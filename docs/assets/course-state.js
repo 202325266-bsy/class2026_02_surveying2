@@ -7,7 +7,20 @@ const str=(v,max)=>typeof v==='string'&&v.length<=max;
 function https(v){try{const u=new URL(v);return u.protocol==='https:'&&!u.username&&!u.password;}catch{return false;}}
 function repoUrl(v){return !v||/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/?$/.test(v);}
 async function digest(v){const bytes=new TextEncoder().encode(JSON.stringify(v));const result=await crypto.subtle.digest('SHA-256',bytes);return Array.from(new Uint8Array(result),x=>x.toString(16).padStart(2,'0')).join('');}
-function decode(issue){if(issue.pull_request||!issue.user||!Number.isSafeInteger(issue.user.id))return null;const m=/<!-- survey2-action-v2\n([^]*?)\n-->/.exec(issue.body||'');if(!m)return null;try{const d=JSON.parse(m[1]);return d&&typeof d==='object'&&!Array.isArray(d)?d:null;}catch{return null;}}
+function decode(issue){
+ if(issue.pull_request||!issue.user||!Number.isSafeInteger(issue.user.id))return null;
+ const body=issue.body||'',m=/<!-- survey2-action-v2\r?\n([^]*?)\r?\n-->/.exec(body);
+ if(m){try{const d=JSON.parse(m[1]);return d&&typeof d==='object'&&!Array.isArray(d)?d:null;}catch{return null;}}
+ // Plain-text feedback is accepted only from the instructor, with an explicit target.
+ // Never reinterpret damaged action metadata or guess a group from the comment body.
+ if(issue.user.id!==OWNER_ID||body.includes('survey2-action-v2'))return null;
+ const title=issue.title||'';
+ const current=/^\[(전체 조|[1-9]\d*조)\]\[교수 코멘트\]\s*(.+)$/.exec(title);
+ const legacy=/^\[교수 코멘트\]\s*([1-9]\d*)조\s*(.*)$/.exec(title);
+ if(current)return {kind:'feedback',group:current[1]==='전체 조'?0:parseInt(current[1],10),title:current[2],body};
+ if(legacy)return {kind:'feedback',group:Number(legacy[1]),title:`${legacy[1]}조${legacy[2]}`,body};
+ return null;
+}
 async function reduce(roster,records,comments=[]){
  const teams=Object.fromEntries(roster.map(t=>[t.id,{...t,accounts:{},settings:{leader:'',report:'',repository:''},plan:null,approval:null,grade:null}]));
  const claims={},feedback=[],results={},events=[...records].filter(i=>!i.pull_request).sort((a,b)=>a.number-b.number);
